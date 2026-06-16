@@ -114,8 +114,8 @@ export const masterApi = {
       headers: { 'Content-Type': 'multipart/form-data' }
     }).then(res => res.data),
   
-  confirmMaster: (id: number): Promise<ApiResponse<any>> =>
-    apiClient.post(`/mastering/${id}/confirm`).then(res => res.data),
+  confirmMaster: (id: number, confirmNote?: string): Promise<ApiResponse<any>> =>
+    apiClient.post(`/mastering/${id}/confirm`, { confirmNote: confirmNote || '' }).then(res => res.data),
   
   getMasters: (taskId?: number): Promise<ApiResponse<Master[]>> =>
     apiClient.get('/mastering', { params: { taskId } }).then(res => res.data)
@@ -131,8 +131,18 @@ export const royaltyApi = {
   getReports: (workId?: number, month?: string): Promise<ApiResponse<RoyaltyReport[]>> =>
     apiClient.get('/royalty/reports', { params: { workId, month } }).then(res => res.data),
   
-  generateReport: (workId: number, month: string): Promise<ApiResponse<RoyaltyReport>> =>
-    apiClient.post('/royalty/reports/generate', { workId, month }).then(res => res.data)
+  generateReport: (params: { workId: number; month: string } | number, maybeMonth?: string): Promise<ApiResponse<RoyaltyReport>> => {
+    let workId: number;
+    let month: string;
+    if (typeof params === 'number') {
+      workId = params;
+      month = maybeMonth || '';
+    } else {
+      workId = params.workId;
+      month = params.month;
+    }
+    return apiClient.post('/royalty/reports/generate', { workId, month }).then(res => res.data);
+  }
 };
 
 export const notificationApi = {
@@ -153,8 +163,26 @@ export const adminApi = {
   getMaterials: (): Promise<ApiResponse<any[]>> =>
     apiClient.get('/admin/materials').then(res => res.data),
   
-  createMaterial: (data: any): Promise<ApiResponse<any>> =>
-    apiClient.post('/admin/materials', data).then(res => res.data),
+  createMaterial: (data: any, file?: File): Promise<ApiResponse<any>> => {
+    if (data.materialType === 'file' && file) {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('name', data.name);
+      formData.append('category', data.category);
+      formData.append('materialType', 'file');
+      formData.append('accessPermissions', JSON.stringify(data.accessPermissions || data.roles || []));
+      return apiClient.post('/admin/materials', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      }).then(res => res.data);
+    }
+    return apiClient.post('/admin/materials', {
+      name: data.name,
+      category: data.category,
+      materialType: 'url',
+      externalUrl: data.filePath || data.externalUrl,
+      accessPermissions: data.accessPermissions || data.roles || []
+    }).then(res => res.data);
+  },
   
   updateMaterial: (id: number, data: any): Promise<ApiResponse<any>> =>
     apiClient.post('/admin/materials/permissions', { materialId: id, accessPermissions: data.accessPermissions }).then(res => res.data),
@@ -164,6 +192,9 @@ export const adminApi = {
   
   getStats: (): Promise<ApiResponse<any>> =>
     apiClient.get('/admin/stats').then(res => res.data),
+  
+  getSettlementCandidates: (): Promise<ApiResponse<any[]>> =>
+    apiClient.get('/admin/settlement-candidates').then(res => res.data),
   
   triggerBackup: (): Promise<ApiResponse<any>> =>
     apiClient.post('/admin/trigger-backup').then(res => res.data),

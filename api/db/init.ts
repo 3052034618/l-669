@@ -110,6 +110,9 @@ export async function initDatabase() {
       is_verified BOOLEAN DEFAULT 0,
       reject_reason TEXT,
       uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      confirmer_id INTEGER,
+      confirmed_at DATETIME,
+      confirm_note TEXT,
       FOREIGN KEY (task_id) REFERENCES mixing_tasks(id)
     );
 
@@ -150,6 +153,7 @@ export async function initDatabase() {
       name VARCHAR(200) NOT NULL,
       category VARCHAR(100) NOT NULL,
       file_path VARCHAR(500) NOT NULL,
+      material_type VARCHAR(10) DEFAULT 'file',
       access_permissions TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -187,6 +191,18 @@ export async function initDatabase() {
 
   try {
     exec('ALTER TABLE works ADD COLUMN melody_hash VARCHAR(64)');
+  } catch (e) {}
+  try {
+    exec('ALTER TABLE materials ADD COLUMN material_type VARCHAR(10) DEFAULT \'file\'');
+  } catch (e) {}
+  try {
+    exec('ALTER TABLE masters ADD COLUMN confirmer_id INTEGER');
+  } catch (e) {}
+  try {
+    exec('ALTER TABLE masters ADD COLUMN confirmed_at DATETIME');
+  } catch (e) {}
+  try {
+    exec('ALTER TABLE masters ADD COLUMN confirm_note TEXT');
   } catch (e) {}
 
   console.log('数据库初始化完成');

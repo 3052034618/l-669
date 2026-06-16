@@ -99,7 +99,8 @@ router.post('/:id/confirm', (req: AuthRequest, res: Response<ApiResponse<any>>) 
     }
     
     const masterId = parseInt(req.params.id);
-    const result = MasterService.confirm(masterId, req.user.id);
+    const { confirmNote } = req.body;
+    const result = MasterService.confirm(masterId, req.user.id, confirmNote || '');
     
     if (!result.success) {
       return res.status(400).json({ success: false, message: result.message });

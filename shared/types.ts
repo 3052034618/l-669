@@ -4,6 +4,8 @@ export interface User {
   id: number;
   email: string;
   name: string;
+  username?: string;
+  nickname?: string;
   role: UserRole;
   avatar: string;
   rating: number;
@@ -46,6 +48,7 @@ export interface Work {
   projectId: number;
   uploaderId: number;
   uploader?: User;
+  creator?: User;
   project?: Project;
   title: string;
   lyrics: string;
@@ -61,11 +64,13 @@ export interface MixingTask {
   work?: Work;
   assigneeId: number | null;
   assignee?: User;
-  status: 'pending' | 'assigned' | 'in_progress' | 'completed' | 'rejected';
+  status: 'pending' | 'assigned' | 'in_progress' | 'mastering' | 'completed' | 'rejected';
   budget: number;
   deadline: string;
   minRatingRequired: number;
   createdAt: string;
+  agreementSignedAt?: string | null;
+  masters?: Master[];
 }
 
 export interface Agreement {
@@ -89,6 +94,9 @@ export interface Master {
   isVerified: boolean;
   rejectReason: string | null;
   uploadedAt: string;
+  confirmerId?: number | null;
+  confirmedAt?: string | null;
+  confirmNote?: string | null;
 }
 
 export interface RoyaltySplit {
@@ -128,6 +136,7 @@ export interface Material {
   name: string;
   category: string;
   filePath: string;
+  materialType: 'file' | 'url';
   accessPermissions: string[];
   createdAt: string;
 }

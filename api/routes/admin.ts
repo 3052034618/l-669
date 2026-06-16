@@ -4,6 +4,20 @@ import { ScheduleService } from '../services/ScheduleService.js';
 import { run, get, all } from '../db/database.js';
 import { Material } from '../../shared/types.js';
 import { ApiResponse } from '../../shared/types.js';
+import multer from 'multer';
+import path from 'path';
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'material-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage });
 
 const router = Router();
 
@@ -28,6 +42,7 @@ router.get('/materials', (req: AuthRequest, res: Response<ApiResponse<any>>) => 
       name: row.name,
       category: row.category,
       filePath: row.file_path,
+      materialType: row.material_type || 'file',
       accessPermissions: JSON.parse(row.access_permissions),
       createdAt: row.created_at
     }));
@@ -38,22 +53,40 @@ router.get('/materials', (req: AuthRequest, res: Response<ApiResponse<any>>) => 
   }
 });
 
-router.post('/materials', (req: AuthRequest, res: Response<ApiResponse<any>>) => {
+router.post('/materials', upload.single('file'), (req: AuthRequest, res: Response<ApiResponse<any>>) => {
   try {
-    const { name, category, filePath, accessPermissions } = req.body;
+    const { name, category, accessPermissions, materialType, externalUrl } = req.body;
     
-    if (!name || !category || !filePath || !accessPermissions) {
-      return res.status(400).json({ success: false, message: '参数不完整' });
+    if (!name || !category || !accessPermissions) {
+      return res.status(400).json({ success: false, message: '名称、分类和访问角色为必填项' });
+    }
+
+    const type = materialType || 'file';
+    let filePath = '';
+    
+    if (type === 'url') {
+      if (!externalUrl) {
+        return res.status(400).json({ success: false, message: '外链模式请填写素材URL' });
+      }
+      filePath = externalUrl;
+    } else {
+      if (!req.file) {
+        return res.status(400).json({ success: false, message: '文件模式请选择要上传的文件' });
+      }
+      filePath = '/' + req.file.path.replace(/\\/g, '/');
     }
     
+    const perms = typeof accessPermissions === 'string' ? JSON.parse(accessPermissions) : accessPermissions;
+
     const result = run(`
-      INSERT INTO materials (name, category, file_path, access_permissions)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO materials (name, category, file_path, material_type, access_permissions)
+      VALUES (?, ?, ?, ?, ?)
     `, [
       name,
       category,
       filePath,
-      JSON.stringify(accessPermissions)
+      type,
+      JSON.stringify(perms)
     ]);
     
     const material = get('SELECT * FROM materials WHERE id = ?', [result.lastInsertRowid]) as any;
@@ -65,12 +98,14 @@ router.post('/materials', (req: AuthRequest, res: Response<ApiResponse<any>>) =>
         name: material.name,
         category: material.category,
         filePath: material.file_path,
+        materialType: material.material_type || 'file',
         accessPermissions: JSON.parse(material.access_permissions),
         createdAt: material.created_at
       },
       message: '素材添加成功' 
     });
   } catch (error) {
+    console.error('Material create error:', error);
     res.status(500).json({ success: false, message: '添加素材失败' });
   }
 });
@@ -152,6 +187,45 @@ router.post('/trigger-settlement', (req: AuthRequest, res: Response<ApiResponse<
     res.json({ success: true, message: '结算任务已触发' });
   } catch (error) {
     res.status(500).json({ success: false, message: '触发结算失败' });
+  }
+});
+
+router.get('/settlement-candidates', (req: AuthRequest, res: Response<ApiResponse<any>>) => {
+  try {
+    const rows = all(`
+      SELECT DISTINCT 
+        w.id as work_id,
+        w.title as work_title,
+        mt.id as task_id,
+        mt.budget,
+        mt.assignee_id,
+        mt.status,
+        u.name as engineer_name,
+        p.name as project_name,
+        mt.created_at
+      FROM mixing_tasks mt
+      JOIN works w ON mt.work_id = w.id
+      JOIN projects p ON w.project_id = p.id
+      LEFT JOIN users u ON mt.assignee_id = u.id
+      WHERE mt.status = 'completed'
+      ORDER BY mt.created_at DESC
+    `, []) as any[];
+
+    const candidates = rows.map(row => ({
+      workId: row.work_id,
+      workTitle: row.work_title,
+      taskId: row.task_id,
+      budget: row.budget,
+      engineerId: row.assignee_id,
+      engineerName: row.engineer_name,
+      projectName: row.project_name,
+      completedAt: row.created_at
+    }));
+    
+    res.json({ success: true, data: candidates });
+  } catch (error) {
+    console.error('Get candidates error:', error);
+    res.status(500).json({ success: false, message: '获取结算候选失败' });
   }
 });
 

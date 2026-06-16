@@ -75,7 +75,63 @@ export class RoyaltyService {
     const work = WorkService.getById(workId);
     if (!work) return null;
     
-    const totalRevenue = Math.random() * 50000 + 5000;
+    const existingSplits = this.getSplits(workId);
+    
+    if (existingSplits.length === 0) {
+      const producerId = work.project?.creatorId || work.uploaderId;
+      const budget = work.project?.creatorId ? work.project.creatorId : null;
+      
+      const taskRow = get(`
+        SELECT mt.assignee_id, mt.budget 
+        FROM mixing_tasks mt 
+        WHERE mt.work_id = ? AND mt.status = 'completed'
+        ORDER BY mt.created_at DESC LIMIT 1
+      `, [workId]) as any;
+      
+      const engineerId = taskRow?.assignee_id || null;
+      const totalRevenue = (taskRow?.budget || 5000) * 2 + Math.random() * 10000;
+      
+      const splitsToCreate: { userId: number; percentage: number }[] = [];
+      
+      if (producerId) {
+        splitsToCreate.push({ userId: producerId, percentage: engineerId ? 60 : 100 });
+      }
+      if (engineerId) {
+        splitsToCreate.push({ userId: engineerId, percentage: 40 });
+        if (producerId) {
+          const found = splitsToCreate.findIndex(s => s.userId === producerId);
+          if (found >= 0) splitsToCreate[found].percentage = 60;
+        }
+      }
+      
+      if (splitsToCreate.length > 0 && splitsToCreate.reduce((s, x) => s + x.percentage, 0) > 0) {
+        const total = splitsToCreate.reduce((s, x) => s + x.percentage, 0);
+        if (total !== 100) {
+          if (splitsToCreate.length >= 1) {
+            splitsToCreate[0].percentage += (100 - total);
+          }
+        }
+        this.setSplit(workId, splitsToCreate);
+      }
+      
+      return this._insertReport(workId, month, totalRevenue);
+    } else {
+      const taskRow = get(`
+        SELECT COALESCE(mt.budget, 5000) as budget 
+        FROM mixing_tasks mt 
+        WHERE mt.work_id = ? AND mt.status = 'completed'
+        ORDER BY mt.created_at DESC LIMIT 1
+      `, [workId]) as any;
+      
+      const totalRevenue = (taskRow?.budget || 5000) * 2 + Math.random() * 10000;
+      
+      return this._insertReport(workId, month, totalRevenue);
+    }
+  }
+
+  private static _insertReport(workId: number, month: string, totalRevenue: number): RoyaltyReport | null {
+    const work = WorkService.getById(workId);
+    if (!work) return null;
     
     const reportsDir = path.join(__dirname, '..', '..', 'reports');
     if (!fs.existsSync(reportsDir)) {

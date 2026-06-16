@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Shield, Database, DollarSign, Music, FolderOpen, Clock, HardDrive, Wifi, Cpu, Play, Settings, Trash2, Users, Upload, Edit3, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { Shield, Database, DollarSign, Music, FolderOpen, Clock, HardDrive, Wifi, Cpu, Play, Settings, Trash2, Users, Upload, Edit3, AlertTriangle, CheckCircle, XCircle, FileText, FileCheck, Calendar, Download, CheckSquare, Square } from 'lucide-react';
 import { Card, Button, Modal, StatCard, StatusBadge } from '../components/Card.js';
-import { adminApi } from '../api/client.js';
+import { adminApi, royaltyApi } from '../api/client.js';
 import { useAuthStore } from '../store/authStore.js';
+import type { MixingTask } from '../../shared/types.js';
 
-type TabType = 'overview' | 'materials' | 'system';
+type TabType = 'overview' | 'materials' | 'settlement' | 'system';
 
 interface Material {
   id: number;
   name: string;
   category: string;
   filePath: string;
+  materialType: 'file' | 'url';
   accessPermissions: string[];
   createdAt: string;
 }
@@ -110,10 +112,21 @@ export const Admin: React.FC = () => {
   const [logs, setLogs] = useState<LogEntry[]>(mockLogs);
   const [permissionModal, setPermissionModal] = useState<{ open: boolean; material: Material | null }>({ open: false, material: null });
   const [uploadModal, setUploadModal] = useState(false);
+  const [uploadMaterialType, setUploadMaterialType] = useState<'file' | 'url'>('file');
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
-  const [uploadForm, setUploadForm] = useState({ name: '', category: '', filePath: '', roles: [] as string[] });
+  const [uploadForm, setUploadForm] = useState({ name: '', category: '', filePath: '', externalUrl: '', roles: [] as string[] });
   const [loading, setLoading] = useState({ backup: false, settlement: false });
   const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' }>({ show: false, message: '', type: 'success' });
+
+  const [settlementCandidates, setSettlementCandidates] = useState<MixingTask[]>([]);
+  const [settlementMonth, setSettlementMonth] = useState<string>(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<number>>(new Set());
+  const [generatingReport, setGeneratingReport] = useState(false);
+  const [settlementLoaded, setSettlementLoaded] = useState(false);
 
   const isAdmin = user?.role === 'admin';
 
@@ -146,6 +159,78 @@ export const Admin: React.FC = () => {
   useEffect(() => {
     fetchMaterials();
   }, []);
+
+  const fetchSettlementCandidates = async () => {
+    try {
+      const response = await adminApi.getSettlementCandidates();
+      if (response.success && response.data) {
+        setSettlementCandidates(response.data as MixingTask[]);
+        setSettlementLoaded(true);
+      }
+    } catch (error) {
+      console.error('Failed to fetch settlement candidates:', error);
+      showToast('加载结算候选失败', 'error');
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'settlement' && !settlementLoaded) {
+      fetchSettlementCandidates();
+    }
+  }, [activeTab, settlementLoaded]);
+
+  const toggleCandidateSelection = (taskId: number) => {
+    const next = new Set(selectedCandidateIds);
+    if (next.has(taskId)) next.delete(taskId);
+    else next.add(taskId);
+    setSelectedCandidateIds(next);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedCandidateIds.size === settlementCandidates.length) {
+      setSelectedCandidateIds(new Set());
+    } else {
+      setSelectedCandidateIds(new Set(settlementCandidates.map(c => c.id)));
+    }
+  };
+
+  const handleGenerateReports = async () => {
+    if (selectedCandidateIds.size === 0) {
+      showToast('请至少选择一个已完成任务', 'error');
+      return;
+    }
+    setGeneratingReport(true);
+    try {
+      let successCount = 0;
+      let failCount = 0;
+      for (const taskId of Array.from(selectedCandidateIds)) {
+        const task = settlementCandidates.find(c => c.id === taskId);
+        if (!task || !task.workId) { failCount++; continue; }
+        try {
+          const res = await royaltyApi.generateReport({ workId: task.workId, month: settlementMonth });
+          if (res.success) successCount++;
+          else failCount++;
+        } catch {
+          failCount++;
+        }
+      }
+      showToast(`报告生成完成：成功 ${successCount} 份，失败 ${failCount} 份。请到版税页面查看。`, successCount > 0 ? 'success' : 'error');
+      setSelectedCandidateIds(new Set());
+    } catch (error: any) {
+      showToast(error?.response?.data?.message || '报告生成失败', 'error');
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 0 }).format(amount);
+  };
+
+  const formatDate = (dateStr: string | undefined | null) => {
+    if (!dateStr) return '-';
+    return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+  };
 
   useEffect(() => {
     if (toast.show) {
@@ -195,16 +280,43 @@ export const Admin: React.FC = () => {
   };
 
   const handleUploadSubmit = async () => {
-    if (!uploadForm.name || !uploadForm.category || !uploadForm.filePath || uploadForm.roles.length === 0) {
-      showToast('请填写完整信息', 'error');
+    const roles = uploadForm.roles.length > 0 ? uploadForm.roles : selectedRoles;
+    
+    if (!uploadForm.name || !uploadForm.category || roles.length === 0) {
+      showToast('请填写名称、分类并选择访问角色', 'error');
       return;
     }
+
+    if (uploadMaterialType === 'file') {
+      if (!uploadFile) {
+        showToast('请选择要上传的素材文件', 'error');
+        return;
+      }
+    } else {
+      if (!uploadForm.externalUrl) {
+        showToast('请填写素材外链地址', 'error');
+        return;
+      }
+    }
+
     try {
-      const response = await adminApi.createMaterial(uploadForm as any);
+      const data = {
+        name: uploadForm.name,
+        category: uploadForm.category,
+        materialType: uploadMaterialType,
+        roles,
+        accessPermissions: roles,
+        filePath: uploadMaterialType === 'url' ? uploadForm.externalUrl : ''
+      };
+      
+      const response = await adminApi.createMaterial(data, uploadFile || undefined);
       if (response.success) {
         await fetchMaterials();
         setUploadModal(false);
-        setUploadForm({ name: '', category: '', filePath: '', roles: [] });
+        setUploadMaterialType('file');
+        setUploadFile(null);
+        setSelectedRoles([]);
+        setUploadForm({ name: '', category: '', filePath: '', externalUrl: '', roles: [] });
         showToast('素材上传成功', 'success');
       } else {
         showToast(response.message || '素材上传失败', 'error');
@@ -327,10 +439,11 @@ export const Admin: React.FC = () => {
         <StatusBadge status="active" />
       </motion.div>
 
-      <motion.div variants={itemVariants} className="flex gap-2 bg-slate-800/40 backdrop-blur-xl p-1.5 rounded-2xl w-fit">
+      <motion.div variants={itemVariants} className="flex gap-2 bg-slate-800/40 backdrop-blur-xl p-1.5 rounded-2xl w-fit flex-wrap">
         {[
           { key: 'overview', label: '统计概览', icon: Database },
           { key: 'materials', label: '素材库管理', icon: FolderOpen },
+          { key: 'settlement', label: '版税结算', icon: DollarSign },
           { key: 'system', label: '系统控制', icon: Settings }
         ].map(tab => (
           <button
@@ -510,7 +623,9 @@ export const Admin: React.FC = () => {
                 <thead>
                   <tr className="border-b border-slate-700/50">
                     <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">素材名称</th>
+                    <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">类型</th>
                     <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">分类</th>
+                    <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">资源地址</th>
                     <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">访问权限</th>
                     <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">上传时间</th>
                     <th className="text-right py-3 px-4 text-sm font-medium text-slate-400">操作</th>
@@ -534,9 +649,25 @@ export const Admin: React.FC = () => {
                         </div>
                       </td>
                       <td className="py-4 px-4">
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${material.materialType === 'url' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-violet-500/20 text-violet-300'}`}>
+                          {material.materialType === 'url' ? '外链资源' : '上传文件'}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4">
                         <span className="px-3 py-1 rounded-full bg-slate-700/50 text-slate-300 text-sm">
                           {material.category}
                         </span>
+                      </td>
+                      <td className="py-4 px-4 max-w-xs">
+                        {material.filePath && material.materialType === 'url' ? (
+                          <a href={material.filePath} target="_blank" rel="noreferrer" className="text-cyan-400 hover:text-cyan-300 text-xs truncate block">
+                            {material.filePath}
+                          </a>
+                        ) : material.filePath ? (
+                          <span className="text-slate-400 text-xs truncate block">{material.filePath}</span>
+                        ) : (
+                          <span className="text-slate-600 text-xs">-</span>
+                        )}
                       </td>
                       <td className="py-4 px-4">
                         <div className="flex flex-wrap gap-1">
@@ -570,6 +701,158 @@ export const Admin: React.FC = () => {
             </div>
           </Card>
         </motion.div>
+      )}
+
+      {activeTab === 'settlement' && (
+        <div className="space-y-6">
+          <motion.div variants={itemVariants}>
+            <Card className="p-6">
+              <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2 mb-2">
+                    <DollarSign className="w-6 h-6 text-emerald-400" />
+                    版税结算中心
+                  </h2>
+                  <p className="text-slate-400 text-sm">
+                    选择结算月份，勾选已完成的混音任务后批量生成版税报告。生成后请前往「版税管理」页面查看报告详情并下载 PDF。
+                  </p>
+                </div>
+                <div className="flex items-end gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
+                      <Calendar className="w-4 h-4 inline mr-1.5 text-cyan-400" />
+                      结算月份
+                    </label>
+                    <input
+                      type="month"
+                      value={settlementMonth}
+                      onChange={(e) => setSettlementMonth(e.target.value)}
+                      className="px-4 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-white focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                    />
+                  </div>
+                  <div>
+                    <Button variant="ghost" onClick={fetchSettlementCandidates}>
+                      刷新候选
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-slate-300">结算候选作品（已完成混音任务）</h3>
+                  <span className="px-2 py-0.5 rounded-full bg-slate-700 text-slate-400 text-xs">
+                    共 {settlementCandidates.length} 条
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button variant="ghost" size="sm" onClick={toggleSelectAll} disabled={settlementCandidates.length === 0}>
+                    {selectedCandidateIds.size === settlementCandidates.length && settlementCandidates.length > 0 ? (
+                      <><CheckSquare className="w-4 h-4" /> 取消全选</>
+                    ) : (
+                      <><Square className="w-4 h-4" /> 全选</>
+                    )}
+                  </Button>
+                  <div className="px-3 py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20 text-sm">
+                    已选 <span className="text-violet-300 font-semibold">{selectedCandidateIds.size}</span> 项
+                  </div>
+                  <Button variant="primary" onClick={handleGenerateReports} loading={generatingReport} disabled={selectedCandidateIds.size === 0}>
+                    <FileText className="w-4 h-4" />
+                    生成版税报告
+                  </Button>
+                </div>
+              </div>
+
+              {!settlementLoaded ? (
+                <div className="flex items-center justify-center py-20">
+                  <div className="animate-spin w-7 h-7 border-2 border-violet-500 border-t-transparent rounded-full" />
+                </div>
+              ) : settlementCandidates.length === 0 ? (
+                <div className="text-center py-16 border-2 border-dashed border-slate-600/50 rounded-2xl">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-slate-800/50 flex items-center justify-center">
+                    <FileCheck className="w-8 h-8 text-slate-600" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-white mb-1">暂无结算候选</h3>
+                  <p className="text-sm text-slate-400">待混音任务完成并经制作人验收后，将自动出现在此处。</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto border border-slate-700/50 rounded-2xl">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="bg-slate-800/50">
+                        <th className="text-left py-3 px-4 text-sm font-medium text-slate-400 w-12"></th>
+                        <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">作品名称</th>
+                        <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">制作人</th>
+                        <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">混音师</th>
+                        <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">预算（分成基数）</th>
+                        <th className="text-left py-3 px-4 text-sm font-medium text-slate-400">验收完成时间</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {settlementCandidates.map((task, index) => {
+                        const selected = selectedCandidateIds.has(task.id);
+                        const confirmedAt = task.masters?.find(m => m.confirmedAt)?.confirmedAt;
+                        return (
+                          <motion.tr
+                            key={task.id}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: index * 0.03 }}
+                            onClick={() => toggleCandidateSelection(task.id)}
+                            className={`border-t border-slate-700/30 cursor-pointer transition-colors ${selected ? 'bg-violet-500/5' : 'hover:bg-slate-700/30'}`}
+                          >
+                            <td className="py-4 px-4">
+                              {selected ? (
+                                <CheckSquare className="w-5 h-5 text-violet-400" />
+                              ) : (
+                                <Square className="w-5 h-5 text-slate-500" />
+                              )}
+                            </td>
+                            <td className="py-4 px-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500/20 to-cyan-500/20 flex items-center justify-center">
+                                  <Music className="w-4.5 h-4.5 text-violet-400" />
+                                </div>
+                                <div>
+                                  <div className="text-white font-medium">{task.work?.title || `作品 #${task.workId}`}</div>
+                                  <div className="text-xs text-slate-500">任务 #{task.id}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-4 px-4 text-sm text-slate-300">
+                              {task.work?.creator?.nickname || task.work?.creator?.username || '-'}
+                            </td>
+                            <td className="py-4 px-4 text-sm text-slate-300">
+                              {task.assignee?.nickname || task.assignee?.username || '-'}
+                            </td>
+                            <td className="py-4 px-4">
+                              <span className="text-emerald-400 font-semibold">{formatCurrency(task.budget)}</span>
+                              <div className="text-xs text-slate-500 mt-0.5">
+                                制作人 60% / 混音师 40%（默认）
+                              </div>
+                            </td>
+                            <td className="py-4 px-4 text-sm text-slate-400">
+                              {formatDate(confirmedAt)}
+                            </td>
+                          </motion.tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="mt-6 flex items-center gap-3 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                <Download className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                <div className="text-sm text-slate-300">
+                  报告生成后，制作人、混音师和管理员都可以在
+                  <span className="text-emerald-400 font-medium mx-1">版税管理</span>
+                  页面查看该月份的作品、参与人分成明细，并下载 PDF 版税报告。
+                </div>
+              </div>
+            </Card>
+          </motion.div>
+        </div>
       )}
 
       {activeTab === 'system' && (
@@ -712,19 +995,35 @@ export const Admin: React.FC = () => {
         title="上传素材"
         size="md"
       >
-        <div className="space-y-4">
+        <div className="space-y-5">
+          <div className="flex gap-2 p-1 bg-slate-700/30 rounded-xl w-full">
+            <button
+              onClick={() => setUploadMaterialType('file')}
+              className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all text-sm ${uploadMaterialType === 'file' ? 'bg-violet-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+            >
+              📁 本地上传
+            </button>
+            <button
+              onClick={() => setUploadMaterialType('url')}
+              className={`flex-1 py-2 px-4 rounded-lg font-medium transition-all text-sm ${uploadMaterialType === 'url' ? 'bg-cyan-500 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+            >
+              🔗 外链资源
+            </button>
+          </div>
+
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">素材名称</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">素材名称 <span className="text-red-400">*</span></label>
             <input
               type="text"
               value={uploadForm.name}
               onChange={(e) => setUploadForm({ ...uploadForm, name: e.target.value })}
-              placeholder="请输入素材名称"
+              placeholder="请输入素材名称，例如：流行鼓组采样包"
               className="w-full px-4 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-white placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
             />
           </div>
+
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">分类</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">分类 <span className="text-red-400">*</span></label>
             <select
               value={uploadForm.category}
               onChange={(e) => setUploadForm({ ...uploadForm, category: e.target.value })}
@@ -736,18 +1035,51 @@ export const Admin: React.FC = () => {
               ))}
             </select>
           </div>
+
+          {uploadMaterialType === 'file' ? (
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">选择文件 <span className="text-red-400">*</span></label>
+              <input
+                id="material-file-upload"
+                type="file"
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                className="hidden"
+              />
+              <label htmlFor="material-file-upload" className="cursor-pointer block">
+                <div className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${uploadFile ? 'border-violet-500 bg-violet-500/5' : 'border-slate-600 hover:border-violet-500'}`}>
+                  {uploadFile ? (
+                    <div>
+                      <div className="w-14 h-14 mx-auto mb-3 rounded-xl bg-violet-500/20 flex items-center justify-center">
+                        <Upload className="w-7 h-7 text-violet-400" />
+                      </div>
+                      <p className="text-white font-medium">{uploadFile.name}</p>
+                      <p className="text-sm text-slate-400 mt-1">{(uploadFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <Upload className="w-14 h-14 text-slate-500 mx-auto mb-3" />
+                      <p className="text-slate-400">点击选择要上传的素材文件</p>
+                      <p className="text-xs text-slate-500 mt-1">支持常见格式（采样、预设、模板等）</p>
+                    </div>
+                  )}
+                </div>
+              </label>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">外链地址 <span className="text-red-400">*</span></label>
+              <input
+                type="url"
+                value={uploadForm.externalUrl}
+                onChange={(e) => setUploadForm({ ...uploadForm, externalUrl: e.target.value })}
+                placeholder="请输入完整 URL，例如：https://example.com/sample-pack.zip"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+              />
+            </div>
+          )}
+
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">文件路径</label>
-            <input
-              type="text"
-              value={uploadForm.filePath}
-              onChange={(e) => setUploadForm({ ...uploadForm, filePath: e.target.value })}
-              placeholder="请输入文件存储路径"
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-700/50 border border-slate-600/50 text-white placeholder-slate-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">访问权限</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">可访问角色 <span className="text-red-400">*</span></label>
             <div className="space-y-2">
               {roleOptions.map(role => (
                 <label key={role.value} className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-700/30 cursor-pointer transition-colors">
@@ -768,9 +1100,18 @@ export const Admin: React.FC = () => {
               ))}
             </div>
           </div>
-          <div className="flex justify-end gap-3 mt-6">
-            <Button variant="ghost" onClick={() => setUploadModal(false)}>取消</Button>
-            <Button onClick={handleUploadSubmit}>上传</Button>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="ghost" onClick={() => {
+              setUploadModal(false);
+              setUploadMaterialType('file');
+              setUploadFile(null);
+              setUploadForm({ name: '', category: '', filePath: '', externalUrl: '', roles: [] });
+            }}>取消</Button>
+            <Button onClick={handleUploadSubmit}>
+              <Upload className="w-4 h-4" />
+              提交入库
+            </Button>
           </div>
         </div>
       </Modal>

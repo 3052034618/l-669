@@ -195,7 +195,7 @@ export class MasterService {
     return rows.map(row => this.mapRow(row));
   }
 
-  static confirm(masterId: number, confirmerId: number): { success: boolean; message: string } {
+  static confirm(masterId: number, confirmerId: number, confirmNote: string = ''): { success: boolean; message: string } {
     const master = this.getById(masterId);
     if (!master) {
       return { success: false, message: '母带不存在' };
@@ -207,24 +207,34 @@ export class MasterService {
     
     const task = master.task;
     if (!task?.work?.project?.creatorId || task.work.project.creatorId !== confirmerId) {
-      return { success: false, message: '只有项目创建者可以确认母带' };
+      const confirmer = AuthService.getById(confirmerId);
+      if (!confirmer || confirmer.role !== 'admin') {
+        return { success: false, message: '只有项目创建者或管理员可以确认母带' };
+      }
     }
     
     run(`
-      UPDATE mixing_tasks SET status = 'completed' WHERE id = ?
-    `, [task.id]);
+      UPDATE masters 
+      SET confirmer_id = ?, confirmed_at = CURRENT_TIMESTAMP, confirm_note = ?
+      WHERE id = ?
+    `, [confirmerId, confirmNote, masterId]);
     
-    if (task.assigneeId) {
-      const engineer = AuthService.getById(task.assigneeId);
+    run(`
+      UPDATE mixing_tasks SET status = 'completed' WHERE id = ?
+    `, [task!.id]);
+    
+    if (task!.assigneeId) {
+      const engineer = AuthService.getById(task!.assigneeId);
       if (engineer) {
-        AuthService.updateUserLoad(task.assigneeId, Math.max(0, engineer.currentLoad - 1));
+        AuthService.updateUserLoad(task!.assigneeId, Math.max(0, engineer.currentLoad - 1));
       }
       
+      const noteText = confirmNote ? `，确认备注：${confirmNote}` : '';
       NotificationService.create(
-        task.assigneeId,
+        task!.assigneeId,
         'task',
         '母带已确认',
-        `您提交的母带「${task.work?.title}」已被制作人确认通过`,
+        `您提交的母带「${task!.work?.title}」已被制作人确认通过${noteText}`,
         `master:${masterId}`
       );
     }
@@ -242,7 +252,10 @@ export class MasterService {
       bitDepth: row.bit_depth,
       isVerified: Boolean(row.is_verified),
       rejectReason: row.reject_reason,
-      uploadedAt: row.uploaded_at
+      uploadedAt: row.uploaded_at,
+      confirmerId: row.confirmer_id ?? null,
+      confirmedAt: row.confirmed_at ?? null,
+      confirmNote: row.confirm_note ?? null
     };
   }
 }

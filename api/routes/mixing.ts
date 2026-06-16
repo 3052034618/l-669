@@ -20,6 +20,19 @@ router.get('/available', (req: AuthRequest, res: Response<ApiResponse<any>>) => 
   }
 });
 
+router.get('/my', (req: AuthRequest, res: Response<ApiResponse<any>>) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: '未登录' });
+    }
+    
+    const tasks = MixingService.getMyTasks(req.user.id, req.user.role);
+    res.json({ success: true, data: tasks });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '获取任务列表失败' });
+  }
+});
+
 router.get('/mine', (req: AuthRequest, res: Response<ApiResponse<any>>) => {
   try {
     if (!req.user) {
