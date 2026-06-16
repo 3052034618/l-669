@@ -178,11 +178,13 @@ export default function Works() {
   const [similarityResult, setSimilarityResult] = useState<{ similarity: number; isLocked: boolean } | null>(null);
   const [checkingSimilarity, setCheckingSimilarity] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [newWork, setNewWork] = useState({
     title: '',
     lyrics: '',
     projectId: 0,
   });
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const fetchWorks = async () => {
@@ -247,6 +249,9 @@ export default function Works() {
       formData.append('title', newWork.title);
       formData.append('lyrics', newWork.lyrics);
       formData.append('projectId', newWork.projectId.toString());
+      if (selectedFile) {
+        formData.append('melody', selectedFile);
+      }
       
       const response = await workApi.uploadWork(formData);
       if (response.success && response.data) {
@@ -258,30 +263,32 @@ export default function Works() {
         };
         setWorks([createdWork, ...works]);
         setNewWork({ title: '', lyrics: '', projectId: 0 });
+        setSelectedFile(null);
         setIsUploadModalOpen(false);
       }
     } catch (error) {
       console.error('Failed to upload work:', error);
-      const createdWork: MockWork = {
-        id: Date.now(),
-        projectId: newWork.projectId,
-        uploaderId: user?.id || 1,
-        projectName: mockProjects.find(p => p.id === newWork.projectId)?.name || '未知项目',
-        uploaderName: user?.name || '当前用户',
-        uploaderAvatar: user?.avatar || 'https://i.pravatar.cc/150?img=10',
-        title: newWork.title,
-        lyrics: newWork.lyrics,
-        melodyPath: '/melodies/new-work.mp3',
-        similarityScore: 0,
-        isLocked: false,
-        createdAt: new Date().toISOString(),
-      };
-      setWorks([createdWork, ...works]);
-      setNewWork({ title: '', lyrics: '', projectId: 0 });
-      setIsUploadModalOpen(false);
+      alert('上传失败，请重试');
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setSelectedFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
   };
 
   const formatDate = (dateString: string) => {
@@ -616,6 +623,10 @@ export default function Works() {
         onClose={() => {
           setIsUploadModalOpen(false);
           setNewWork({ title: '', lyrics: '', projectId: 0 });
+          setSelectedFile(null);
+          if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+          }
         }}
         title="上传新作品"
         size="md"
@@ -670,10 +681,46 @@ export default function Works() {
             <label className="block text-sm font-medium text-slate-300 mb-2">
               旋律文件
             </label>
-            <div className="border-2 border-dashed border-slate-600/50 rounded-xl p-8 text-center hover:border-violet-500/50 transition-colors cursor-pointer">
-              <Upload className="w-10 h-10 text-slate-500 mx-auto mb-3" />
-              <p className="text-slate-400 text-sm">点击或拖拽文件到此处上传</p>
-              <p className="text-slate-500 text-xs mt-1">支持 MP3, WAV, M4A 格式</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".mp3,.wav,.m4a,.flac"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              className="border-2 border-dashed border-slate-600/50 rounded-xl p-8 text-center hover:border-violet-500/50 transition-colors cursor-pointer"
+            >
+              {selectedFile ? (
+                <div>
+                  <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-violet-500/20 flex items-center justify-center">
+                    <Music className="w-6 h-6 text-violet-400" />
+                  </div>
+                  <p className="text-slate-300 text-sm font-medium">{selectedFile.name}</p>
+                  <p className="text-slate-500 text-xs mt-1">
+                    {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = '';
+                    }}
+                    className="mt-2 text-xs text-red-400 hover:text-red-300"
+                  >
+                    移除文件
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <Upload className="w-10 h-10 text-slate-500 mx-auto mb-3" />
+                  <p className="text-slate-400 text-sm">点击或拖拽文件到此处上传</p>
+                  <p className="text-slate-500 text-xs mt-1">支持 MP3, WAV, M4A, FLAC 格式</p>
+                </div>
+              )}
             </div>
           </div>
 
