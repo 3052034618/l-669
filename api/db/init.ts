@@ -69,6 +69,7 @@ export async function initDatabase() {
       title VARCHAR(200) NOT NULL,
       lyrics TEXT,
       melody_path VARCHAR(500),
+      melody_hash VARCHAR(64),
       similarity_score DECIMAL(5,2) DEFAULT 0,
       is_locked BOOLEAN DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -183,6 +184,10 @@ export async function initDatabase() {
     console.log('混音师: engineer@music.com / engineer123');
     console.log('词曲作者: songwriter@music.com / songwriter123');
   }
+
+  try {
+    exec('ALTER TABLE works ADD COLUMN melody_hash VARCHAR(64)');
+  } catch (e) {}
 
   console.log('数据库初始化完成');
 }

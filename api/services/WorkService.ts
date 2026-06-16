@@ -3,6 +3,9 @@ import { Work } from '../../shared/types.js';
 import { AuthService } from './AuthService.js';
 import { ProjectService } from './ProjectService.js';
 import { NotificationService } from './NotificationService.js';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
 
 export class WorkService {
   static create(
@@ -15,13 +18,15 @@ export class WorkService {
     const project = ProjectService.getById(projectId);
     if (!project) return null;
     
+    const melodyHash = melodyPath ? this.computeFileHash(melodyPath) : '';
+    
     const result = run(`
-      INSERT INTO works (project_id, uploader_id, title, lyrics, melody_path)
-      VALUES (?, ?, ?, ?, ?)
-    `, [projectId, uploaderId, title, lyrics, melodyPath]);
+      INSERT INTO works (project_id, uploader_id, title, lyrics, melody_path, melody_hash)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [projectId, uploaderId, title, lyrics, melodyPath, melodyHash]);
     const workId = result.lastInsertRowid as number;
     
-    const similarityScore = this.checkSimilarity(title, lyrics);
+    const similarityScore = this.checkSimilarity(workId, title, lyrics, melodyHash);
     const isLocked = similarityScore > 70;
     
     if (isLocked) {
@@ -83,6 +88,20 @@ export class WorkService {
     return this.getById(workId);
   }
 
+  private static computeFileHash(filePath: string): string {
+    try {
+      if (!filePath || !fs.existsSync(filePath)) {
+        return '';
+      }
+      const fileBuffer = fs.readFileSync(filePath);
+      const hashSum = crypto.createHash('sha256');
+      hashSum.update(fileBuffer);
+      return hashSum.digest('hex');
+    } catch (error) {
+      return '';
+    }
+  }
+
   static getById(id: number): Work | null {
     const row = get('SELECT * FROM works WHERE id = ?', [id]) as any;
     if (!row) return null;
@@ -118,12 +137,74 @@ export class WorkService {
     });
   }
 
-  static checkSimilarity(title: string, lyrics: string): number {
-    const hash = this.simpleHash(title + lyrics);
-    return (hash % 100) + Math.random() * 20;
+  static checkSimilarity(currentWorkId: number, title: string, lyrics: string, melodyHash: string): number {
+    const allWorks = all('SELECT id, title, lyrics, melody_hash FROM works WHERE id != ?', [currentWorkId]) as any[];
+    
+    if (allWorks.length === 0) {
+      return Math.floor(this.stableHash(title + lyrics) % 30);
+    }
+    
+    let maxSimilarity = 0;
+    
+    for (const existingWork of allWorks) {
+      let similarity = 0;
+      
+      if (melodyHash && existingWork.melody_hash && melodyHash === existingWork.melody_hash) {
+        similarity = 95;
+      } else {
+        const titleSim = this.stringSimilarity(title, existingWork.title);
+        const lyricsSim = this.stringSimilarity(lyrics || '', existingWork.lyrics || '');
+        similarity = Math.round(titleSim * 0.4 + lyricsSim * 0.6);
+      }
+      
+      if (similarity > maxSimilarity) {
+        maxSimilarity = similarity;
+      }
+    }
+    
+    return Math.min(99, maxSimilarity);
   }
 
-  private static simpleHash(str: string): number {
+  static checkSimilarityById(workId: number): number {
+    const work = this.getById(workId);
+    if (!work) return 0;
+    
+    const row = get('SELECT melody_hash FROM works WHERE id = ?', [workId]) as any;
+    const melodyHash = row?.melody_hash || '';
+    
+    return this.checkSimilarity(workId, work.title, work.lyrics || '', melodyHash);
+  }
+
+  private static stringSimilarity(str1: string, str2: string): number {
+    if (!str1 || !str2) return 0;
+    if (str1 === str2) return 100;
+    
+    const s1 = str1.toLowerCase().replace(/\s+/g, '');
+    const s2 = str2.toLowerCase().replace(/\s+/g, '');
+    
+    if (s1.length < 2 || s2.length < 2) return 0;
+    
+    let matches = 0;
+    const len1 = s1.length;
+    const len2 = s2.length;
+    
+    for (let i = 0; i <= len1 - 2; i++) {
+      const sub1 = s1.substring(i, i + 2);
+      for (let j = 0; j <= len2 - 2; j++) {
+        if (sub1 === s2.substring(j, j + 2)) {
+          matches++;
+          break;
+        }
+      }
+    }
+    
+    const maxPossible = Math.min(len1, len2) - 1;
+    if (maxPossible <= 0) return 0;
+    
+    return Math.round((matches / maxPossible) * 100);
+  }
+
+  private static stableHash(str: string): number {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
       const char = str.charCodeAt(i);

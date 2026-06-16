@@ -3,6 +3,8 @@ import { Master } from '../../shared/types.js';
 import { AuthService } from './AuthService.js';
 import { MixingService } from './MixingService.js';
 import { NotificationService } from './NotificationService.js';
+import * as mm from 'music-metadata';
+import fs from 'fs';
 
 export interface AudioVerificationResult {
   format: string;
@@ -13,11 +15,11 @@ export interface AudioVerificationResult {
 }
 
 export class MasterService {
-  static upload(
+  static async upload(
     taskId: number,
     filePath: string,
     originalName: string
-  ): { success: boolean; message: string; master?: Master } {
+  ): Promise<{ success: boolean; message: string; master?: Master }> {
     const task = MixingService.getTaskById(taskId);
     if (!task) {
       return { success: false, message: '任务不存在' };
@@ -27,7 +29,7 @@ export class MasterService {
       return { success: false, message: '任务状态不正确，无法上传母带' };
     }
     
-    const verification = this.verifyAudio(originalName);
+    const verification = await this.verifyAudio(filePath, originalName);
     
     const result = run(`
       INSERT INTO masters (task_id, file_path, format, sample_rate, bit_depth, is_verified, reject_reason)
@@ -79,13 +81,13 @@ export class MasterService {
     };
   }
 
-  static verifyAudio(filename: string): AudioVerificationResult {
+  static async verifyAudio(filePath: string, filename: string): Promise<AudioVerificationResult> {
     const ext = filename.split('.').pop()?.toLowerCase() || '';
     const validFormats = ['wav', 'flac'];
     
     if (!validFormats.includes(ext)) {
       return {
-        format: ext.toUpperCase(),
+        format: ext.toUpperCase() || 'UNKNOWN',
         sampleRate: 0,
         bitDepth: 0,
         isValid: false,
@@ -93,39 +95,60 @@ export class MasterService {
       };
     }
     
-    const sampleRates = [44100, 48000, 96000, 192000];
-    const bitDepths = [16, 24, 32];
-    
-    const sampleRate = sampleRates[Math.floor(Math.random() * sampleRates.length)];
-    const bitDepth = bitDepths[Math.floor(Math.random() * bitDepths.length)];
-    
-    if (sampleRate < 44100) {
+    if (!fs.existsSync(filePath)) {
       return {
         format: ext.toUpperCase(),
-        sampleRate,
-        bitDepth,
+        sampleRate: 0,
+        bitDepth: 0,
         isValid: false,
-        rejectReason: `采样率不达标：${sampleRate / 1000}kHz，最低要求 44.1kHz`
+        rejectReason: '文件不存在或已损坏'
       };
     }
     
-    if (bitDepth < 24) {
+    try {
+      const metadata = await mm.parseFile(filePath);
+      const format = metadata.format;
+      
+      const sampleRate = format.sampleRate || 0;
+      const bitDepth = format.bitsPerSample || 0;
+      const codec = (format.codec || ext).toUpperCase();
+      
+      if (sampleRate < 44100) {
+        return {
+          format: codec,
+          sampleRate,
+          bitDepth,
+          isValid: false,
+          rejectReason: `采样率不达标：${(sampleRate / 1000).toFixed(1)}kHz，最低要求 44.1kHz`
+        };
+      }
+      
+      if (bitDepth < 24) {
+        return {
+          format: codec,
+          sampleRate,
+          bitDepth,
+          isValid: false,
+          rejectReason: `位深度不达标：${bitDepth}bit，最低要求 24bit`
+        };
+      }
+      
       return {
-        format: ext.toUpperCase(),
+        format: codec,
         sampleRate,
         bitDepth,
+        isValid: true,
+        rejectReason: null
+      };
+    } catch (error) {
+      return {
+        format: ext.toUpperCase(),
+        sampleRate: 0,
+        bitDepth: 0,
         isValid: false,
-        rejectReason: `位深度不达标：${bitDepth}bit，最低要求 24bit`
+        rejectReason: '音频文件解析失败，请检查文件是否损坏'
       };
     }
-    
-    return {
-      format: ext.toUpperCase(),
-      sampleRate,
-      bitDepth,
-      isValid: true,
-      rejectReason: null
-    };
   }
 
   static getById(id: number): Master | null {

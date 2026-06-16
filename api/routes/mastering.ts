@@ -49,7 +49,7 @@ router.get('/:id', (req: AuthRequest, res: Response<ApiResponse<any>>) => {
   }
 });
 
-router.post('/:taskId', upload.single('master'), (req: AuthRequest, res: Response<ApiResponse<any>>) => {
+router.post('/:taskId', upload.single('master'), async (req: AuthRequest, res: Response<ApiResponse<any>>) => {
   try {
     if (!req.user || req.user.role !== 'engineer') {
       return res.status(403).json({ success: false, message: '只有混音师可以上传母带' });
@@ -63,7 +63,7 @@ router.post('/:taskId', upload.single('master'), (req: AuthRequest, res: Respons
       return res.status(400).json({ success: false, message: '请选择要上传的文件' });
     }
     
-    const result = MasterService.upload(taskId, filePath, originalName);
+    const result = await MasterService.upload(taskId, filePath, originalName);
     
     if (!result.success) {
       return res.status(400).json({ success: false, message: result.message });
@@ -71,17 +71,23 @@ router.post('/:taskId', upload.single('master'), (req: AuthRequest, res: Respons
     
     res.json({ success: true, data: result.master, message: result.message });
   } catch (error) {
+    console.error('Master upload error:', error);
     res.status(500).json({ success: false, message: '上传母带失败' });
   }
 });
 
-router.post('/:id/verify', (req: AuthRequest, res: Response<ApiResponse<any>>) => {
+router.post('/:id/verify', async (req: AuthRequest, res: Response<ApiResponse<any>>) => {
   try {
     const { filename } = req.body;
-    const result = MasterService.verifyAudio(filename);
+    const master = MasterService.getById(parseInt(req.params.id));
+    if (!master) {
+      return res.status(404).json({ success: false, message: '母带不存在' });
+    }
+    const result = await MasterService.verifyAudio(master.filePath, filename || 'audio.wav');
     
     res.json({ success: true, data: result });
   } catch (error) {
+    console.error('Verify error:', error);
     res.status(500).json({ success: false, message: '检测失败' });
   }
 });

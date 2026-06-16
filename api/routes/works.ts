@@ -42,9 +42,14 @@ router.post('/', upload.single('melody'), (req: AuthRequest, res: Response<ApiRe
     
     const { projectId, title, lyrics } = req.body;
     const melodyPath = req.file?.path || '';
+    const originalName = req.file?.originalname || '';
     
     if (!projectId || !title) {
       return res.status(400).json({ success: false, message: '项目ID和作品标题不能为空' });
+    }
+    
+    if (!melodyPath) {
+      return res.status(400).json({ success: false, message: '请选择旋律音频文件' });
     }
     
     const work = WorkService.create(
@@ -59,7 +64,7 @@ router.post('/', upload.single('melody'), (req: AuthRequest, res: Response<ApiRe
       return res.status(400).json({ success: false, message: '创建作品失败' });
     }
     
-    res.json({ success: true, data: work });
+    res.json({ success: true, data: { ...work, originalName } });
   } catch (error) {
     res.status(500).json({ success: false, message: '上传作品失败' });
   }
@@ -89,17 +94,48 @@ router.post('/:id/check-similarity', (req: AuthRequest, res: Response<ApiRespons
       return res.status(404).json({ success: false, message: '作品不存在' });
     }
     
-    const similarity = WorkService.checkSimilarity(work.title, work.lyrics);
+    const similarity = WorkService.checkSimilarityById(workId);
+    const isLocked = similarity > 70;
+    
+    if (isLocked && !work.isLocked) {
+      const { run } = require('../db/database.js');
+      run('UPDATE works SET is_locked = 1, similarity_score = ? WHERE id = ?', [similarity, workId]);
+      
+      const { NotificationService } = require('../services/NotificationService.js');
+      const { AuthService } = require('../services/AuthService.js');
+      
+      if (work.uploaderId) {
+        NotificationService.create(
+          work.uploaderId,
+          'upload',
+          '作品相似度检测异常',
+          `您的作品「${work.title}」旋律相似度达${similarity}%，已被锁定`,
+          `work:${workId}`
+        );
+      }
+      
+      const admins = AuthService.getAll('admin');
+      admins.forEach((admin: any) => {
+        NotificationService.create(
+          admin.id,
+          'upload',
+          '疑似重复作品',
+          `作品「${work.title}」旋律相似度达${similarity}%，已被锁定`,
+          `work:${workId}`
+        );
+      });
+    }
     
     res.json({ 
       success: true, 
       data: { 
         similarity, 
-        isLocked: similarity > 70,
-        message: similarity > 70 ? '旋律相似度超过70%，文件已锁定' : '旋律相似度正常'
+        isLocked,
+        message: isLocked ? '旋律相似度超过70%，文件已锁定' : '旋律相似度正常'
       } 
     });
   } catch (error) {
+    console.error('Similarity check error:', error);
     res.status(500).json({ success: false, message: '检测失败' });
   }
 });
