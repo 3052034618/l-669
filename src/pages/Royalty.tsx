@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { DollarSign, FileText, Download, Settings, TrendingUp, Users, Music, Calendar, ChevronRight, Check } from 'lucide-react';
 import { Card, Button, Modal, StatCard, StatusBadge } from '../components/Card.js';
-import { royaltyApi } from '../api/client.js';
+import { royaltyApi, workApi } from '../api/client.js';
 import { useAuthStore } from '../store/authStore.js';
 import type { RoyaltySplit, RoyaltyReport, User, Work } from '../../shared/types.js';
 
@@ -20,104 +20,10 @@ interface WorkWithSplits extends Work {
   totalRevenue?: number;
 }
 
-const mockParticipants: Participant[] = [
-  { id: 1, name: '张明', role: '制作人', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=producer', percentage: 40 },
-  { id: 2, name: '李华', role: '混音师', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=engineer', percentage: 25 },
-  { id: 3, name: '王芳', role: '词曲作者', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=songwriter', percentage: 25 },
-  { id: 4, name: '赵强', role: '录音师', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=recording', percentage: 10 },
-];
-
-const mockWorks: WorkWithSplits[] = [
-  {
-    id: 1, projectId: 1, uploaderId: 1, title: '夏日微风', lyrics: '', melodyPath: '', similarityScore: 0.85, isLocked: false, createdAt: '2024-01-15',
-    splits: [
-      { ...mockParticipants[0], percentage: 40 },
-      { ...mockParticipants[1], percentage: 25 },
-      { ...mockParticipants[2], percentage: 25 },
-      { ...mockParticipants[3], percentage: 10 },
-    ],
-    totalRevenue: 28500
-  },
-  {
-    id: 2, projectId: 1, uploaderId: 1, title: '星空下的约定', lyrics: '', melodyPath: '', similarityScore: 0.78, isLocked: false, createdAt: '2024-02-20',
-    splits: [
-      { ...mockParticipants[0], percentage: 35 },
-      { ...mockParticipants[1], percentage: 30 },
-      { ...mockParticipants[2], percentage: 35 },
-    ],
-    totalRevenue: 42000
-  },
-  {
-    id: 3, projectId: 2, uploaderId: 2, title: '城市夜曲', lyrics: '', melodyPath: '', similarityScore: 0.92, isLocked: true, createdAt: '2024-03-10',
-    splits: [
-      { ...mockParticipants[0], percentage: 50 },
-      { ...mockParticipants[1], percentage: 25 },
-      { ...mockParticipants[2], percentage: 25 },
-    ],
-    totalRevenue: 18600
-  },
-  {
-    id: 4, projectId: 2, uploaderId: 2, title: '海浪的声音', lyrics: '', melodyPath: '', similarityScore: 0.65, isLocked: false, createdAt: '2024-04-05',
-    splits: [
-      { ...mockParticipants[0], percentage: 45 },
-      { ...mockParticipants[1], percentage: 20 },
-      { ...mockParticipants[2], percentage: 20 },
-      { ...mockParticipants[3], percentage: 15 },
-    ],
-    totalRevenue: 35200
-  },
-  {
-    id: 5, projectId: 3, uploaderId: 1, title: '追梦人', lyrics: '', melodyPath: '', similarityScore: 0.88, isLocked: false, createdAt: '2024-05-18',
-    splits: [
-      { ...mockParticipants[0], percentage: 30 },
-      { ...mockParticipants[1], percentage: 30 },
-      { ...mockParticipants[2], percentage: 40 },
-    ],
-    totalRevenue: 52800
-  },
-  {
-    id: 6, projectId: 3, uploaderId: 2, title: '雨后彩虹', lyrics: '', melodyPath: '', similarityScore: 0.72, isLocked: false, createdAt: '2024-06-22',
-    splits: [
-      { ...mockParticipants[0], percentage: 40 },
-      { ...mockParticipants[1], percentage: 25 },
-      { ...mockParticipants[2], percentage: 25 },
-      { ...mockParticipants[3], percentage: 10 },
-    ],
-    totalRevenue: 23400
-  },
-];
-
-const mockReports: (RoyaltyReport & { work?: Work; splits?: Participant[] })[] = [
-  {
-    id: 1, workId: 1, reportPath: '/reports/2024-06.pdf', totalRevenue: 125800, month: '2024-06', generatedAt: '2024-07-05',
-    work: mockWorks[0],
-    splits: mockWorks[0].splits
-  },
-  {
-    id: 2, workId: 2, reportPath: '/reports/2024-06.pdf', totalRevenue: 98500, month: '2024-06', generatedAt: '2024-07-05',
-    work: mockWorks[1],
-    splits: mockWorks[1].splits
-  },
-  {
-    id: 3, workId: 5, reportPath: '/reports/2024-05.pdf', totalRevenue: 156200, month: '2024-05', generatedAt: '2024-06-05',
-    work: mockWorks[4],
-    splits: mockWorks[4].splits
-  },
-  {
-    id: 4, workId: 4, reportPath: '/reports/2024-04.pdf', totalRevenue: 87600, month: '2024-04', generatedAt: '2024-05-05',
-    work: mockWorks[3],
-    splits: mockWorks[3].splits
-  },
-];
-
-const monthlyRevenueData = [
-  { month: '1月', 收益: 85000 },
-  { month: '2月', 收益: 92000 },
-  { month: '3月', 收益: 78000 },
-  { month: '4月', 收益: 105000 },
-  { month: '5月', 收益: 135000 },
-  { month: '6月', 收益: 168000 },
-];
+interface ReportWithDetails extends RoyaltyReport {
+  work?: Work;
+  splits?: Participant[];
+}
 
 const PIE_COLORS = ['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'];
 
@@ -134,38 +40,102 @@ const itemVariants = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.5 } }
 };
 
+const API_HOST = 'http://localhost:3001';
+
+const getRoleLabel = (role: string) => {
+  const labels: Record<string, string> = {
+    'producer': '制作人',
+    'engineer': '混音师',
+    'songwriter': '词曲作者',
+    'admin': '管理员',
+    'recording': '录音师'
+  };
+  return labels[role] || role;
+};
+
 export const Royalty: React.FC = () => {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'settings' | 'reports'>('settings');
-  const [works, setWorks] = useState<WorkWithSplits[]>(mockWorks);
-  const [reports, setReports] = useState(mockReports);
+  const [works, setWorks] = useState<WorkWithSplits[]>([]);
+  const [reports, setReports] = useState<ReportWithDetails[]>([]);
   const [selectedWork, setSelectedWork] = useState<WorkWithSplits | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [tempSplits, setTempSplits] = useState<Participant[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const totalPercentage = tempSplits.reduce((sum, p) => sum + p.percentage, 0);
   const isPercentageValid = totalPercentage === 100;
 
-  const monthlyRevenue = 168000;
-  const totalRevenue = 663000;
-  const mySplitPercentage = 40;
-  const reportCount = 4;
+  const totalRevenue = reports.reduce((sum, r) => sum + (r.totalRevenue || 0), 0);
+  const mySplitPercentage = user && works.length > 0
+    ? Math.round(works.reduce((sum, w) => {
+        const mySplit = w.splits.find(s => s.id === user.id);
+        return sum + (mySplit ? mySplit.percentage : 0);
+      }, 0) / works.length)
+    : 0;
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [worksRes, reportsRes] = await Promise.all([
+        workApi.getWorks(),
+        royaltyApi.getReports()
+      ]);
+
+      const worksData: WorkWithSplits[] = [];
+      if (worksRes.success && worksRes.data) {
+        for (const w of worksRes.data) {
+          try {
+            const splitsRes = await royaltyApi.getSplits(w.id);
+            const splits: Participant[] = (splitsRes.success && splitsRes.data)
+              ? splitsRes.data.map((s: RoyaltySplit) => ({
+                  id: s.userId,
+                  name: s.user?.name || '未知用户',
+                  role: s.user?.role || '',
+                  avatar: s.user?.avatar || '',
+                  percentage: s.percentage
+                }))
+              : [];
+            worksData.push({ ...w, splits, totalRevenue: 0 });
+          } catch {
+            worksData.push({ ...w, splits: [], totalRevenue: 0 });
+          }
+        }
+      }
+      setWorks(worksData);
+
+      const reportsData: ReportWithDetails[] = [];
+      if (reportsRes.success && reportsRes.data) {
+        for (const r of reportsRes.data) {
+          try {
+            const splitsRes = await royaltyApi.getSplits(r.workId);
+            const splits: Participant[] = (splitsRes.success && splitsRes.data)
+              ? splitsRes.data.map((s: RoyaltySplit) => ({
+                  id: s.userId,
+                  name: s.user?.name || '未知用户',
+                  role: s.user?.role || '',
+                  avatar: s.user?.avatar || '',
+                  percentage: s.percentage
+                }))
+              : [];
+            reportsData.push({ ...r, splits });
+          } catch {
+            reportsData.push({ ...r, splits: [] });
+          }
+        }
+      }
+      setReports(reportsData);
+    } catch (err) {
+      console.error('加载数据失败', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      const [splitsRes, reportsRes] = await Promise.all([
-        royaltyApi.getSplits(1),
-        royaltyApi.getReports()
-      ]);
-    } catch (err) {
-      console.log('使用模拟数据');
-    }
-  };
+  }, [loadData]);
 
   const handleOpenSplitModal = (work: WorkWithSplits) => {
     setSelectedWork(work);
@@ -181,15 +151,15 @@ export const Royalty: React.FC = () => {
 
   const handleSaveSplits = async () => {
     if (!selectedWork || !isPercentageValid) return;
-    
+
     setIsSaving(true);
     try {
       await royaltyApi.setSplits(selectedWork.id, tempSplits.map(s => ({
         userId: s.id,
         percentage: s.percentage
       })));
-      
-      setWorks(works.map(w => 
+
+      setWorks(works.map(w =>
         w.id === selectedWork.id ? { ...w, splits: tempSplits } : w
       ));
       setIsModalOpen(false);
@@ -200,11 +170,14 @@ export const Royalty: React.FC = () => {
     }
   };
 
-  const handleDownloadReport = (report: typeof mockReports[0]) => {
+  const handleDownloadReport = (report: ReportWithDetails) => {
+    const url = `${API_HOST}${report.reportPath}`;
     const link = document.createElement('a');
-    link.href = '#';
-    link.download = `版税报告_${report.work?.title}_${report.month}.pdf`;
+    link.href = url;
+    link.download = `版税报告_${report.work?.title || report.workId}_${report.month}.pdf`;
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
   };
 
   const pieData = tempSplits.map(s => ({
@@ -212,15 +185,43 @@ export const Royalty: React.FC = () => {
     value: s.percentage
   }));
 
-  const getRoleLabel = (role: string) => {
-    const labels: Record<string, string> = {
-      'producer': '制作人',
-      'engineer': '混音师',
-      'songwriter': '词曲作者',
-      'recording': '录音师'
-    };
-    return labels[role] || role;
-  };
+  const monthlyRevenueMap = new Map<string, number>();
+  reports.forEach(r => {
+    const m = r.month;
+    monthlyRevenueMap.set(m, (monthlyRevenueMap.get(m) || 0) + (r.totalRevenue || 0));
+  });
+  const monthlyRevenueData = Array.from(monthlyRevenueMap.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([month, revenue]) => ({
+      month: month.replace(/^\d{4}-/, '') + '月',
+      收益: Math.round(revenue)
+    }));
+
+  const globalSplitsMap = new Map<string, { name: string; role: string; totalPercentage: number; count: number }>();
+  works.forEach(w => {
+    w.splits.forEach(s => {
+      const key = `${s.name}_${s.role}`;
+      const existing = globalSplitsMap.get(key);
+      if (existing) {
+        existing.totalPercentage += s.percentage;
+        existing.count += 1;
+      } else {
+        globalSplitsMap.set(key, { name: s.name, role: s.role, totalPercentage: s.percentage, count: 1 });
+      }
+    });
+  });
+  const globalSplitData = Array.from(globalSplitsMap.values()).map(s => ({
+    ...s,
+    avgPercentage: Math.round(s.totalPercentage / s.count)
+  }));
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-slate-400 text-lg">加载中...</div>
+      </div>
+    );
+  }
 
   return (
     <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-6">
@@ -262,17 +263,9 @@ export const Royalty: React.FC = () => {
         <>
           <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
-              title="本月收益"
-              value={`¥${monthlyRevenue.toLocaleString()}`}
-              icon={<DollarSign className="w-6 h-6 text-white" />}
-              trend={12}
-              color="green"
-            />
-            <StatCard
               title="累计收益"
               value={`¥${totalRevenue.toLocaleString()}`}
               icon={<TrendingUp className="w-6 h-6 text-white" />}
-              trend={8}
               color="cyan"
             />
             <StatCard
@@ -286,6 +279,12 @@ export const Royalty: React.FC = () => {
               value={works.length}
               icon={<Music className="w-6 h-6 text-white" />}
               color="yellow"
+            />
+            <StatCard
+              title="报告数量"
+              value={reports.length}
+              icon={<FileText className="w-6 h-6 text-white" />}
+              color="green"
             />
           </motion.div>
 
@@ -301,59 +300,71 @@ export const Royalty: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {works.map((work) => (
-                  <Card
-                    key={work.id}
-                    hover
-                    onClick={() => handleOpenSplitModal(work)}
-                    className="p-4 group"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="text-white font-medium group-hover:text-violet-300 transition-colors">
-                            {work.title}
-                          </h3>
-                          {work.isLocked && (
-                            <StatusBadge status="locked" size="sm" />
-                          )}
-                        </div>
-                        <p className="text-sm text-slate-500">
-                          累计收益: ¥{work.totalRevenue?.toLocaleString()}
-                        </p>
-                      </div>
-                      <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-violet-400 transition-colors" />
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex -space-x-2">
-                        {work.splits.slice(0, 4).map((participant, idx) => (
-                          <img
-                            key={participant.id}
-                            src={participant.avatar}
-                            alt={participant.name}
-                            className="w-8 h-8 rounded-full border-2 border-slate-800"
-                            style={{ zIndex: 4 - idx }}
-                          />
-                        ))}
-                        {work.splits.length > 4 && (
-                          <div className="w-8 h-8 rounded-full border-2 border-slate-800 bg-slate-700 flex items-center justify-center text-xs text-slate-400 font-medium">
-                            +{work.splits.length - 4}
+              {works.length === 0 ? (
+                <div className="text-center py-12 text-slate-500">
+                  暂无作品数据，请先上传作品
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {works.map((work) => (
+                    <Card
+                      key={work.id}
+                      hover
+                      onClick={() => handleOpenSplitModal(work)}
+                      className="p-4 group"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <h3 className="text-white font-medium group-hover:text-violet-300 transition-colors">
+                              {work.title}
+                            </h3>
+                            {work.isLocked && (
+                              <StatusBadge status="locked" size="sm" />
+                            )}
                           </div>
+                          <p className="text-sm text-slate-500">
+                            上传于 {work.createdAt}
+                          </p>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-violet-400 transition-colors" />
+                      </div>
+
+                      <div className="space-y-2">
+                        {work.splits.length > 0 ? (
+                          <>
+                            <div className="flex -space-x-2">
+                              {work.splits.slice(0, 4).map((participant, idx) => (
+                                <div
+                                  key={participant.id}
+                                  className="w-8 h-8 rounded-full border-2 border-slate-800 bg-violet-500/30 flex items-center justify-center text-xs text-violet-300 font-medium"
+                                  style={{ zIndex: 4 - idx }}
+                                >
+                                  {participant.name.charAt(0)}
+                                </div>
+                              ))}
+                              {work.splits.length > 4 && (
+                                <div className="w-8 h-8 rounded-full border-2 border-slate-800 bg-slate-700 flex items-center justify-center text-xs text-slate-400 font-medium">
+                                  +{work.splits.length - 4}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {work.splits.map((p) => (
+                                <span key={p.id} className="text-xs text-slate-500">
+                                  {p.name} {p.percentage}%
+                                </span>
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-xs text-slate-600">未设置分成</p>
                         )}
                       </div>
-                      <div className="flex flex-wrap gap-1">
-                        {work.splits.map((p) => (
-                          <span key={p.id} className="text-xs text-slate-500">
-                            {getRoleLabel(p.role)} {p.percentage}%
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
             </Card>
           </motion.div>
         </>
@@ -363,18 +374,10 @@ export const Royalty: React.FC = () => {
         <>
           <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
-              title="本月收益"
-              value={`¥${monthlyRevenue.toLocaleString()}`}
-              icon={<DollarSign className="w-6 h-6 text-white" />}
-              trend={12}
-              color="green"
-            />
-            <StatCard
               title="累计收益"
               value={`¥${totalRevenue.toLocaleString()}`}
-              icon={<TrendingUp className="w-6 h-6 text-white" />}
-              trend={8}
-              color="cyan"
+              icon={<DollarSign className="w-6 h-6 text-white" />}
+              color="green"
             />
             <StatCard
               title="平均分成"
@@ -384,9 +387,15 @@ export const Royalty: React.FC = () => {
             />
             <StatCard
               title="报告数量"
-              value={reportCount}
+              value={reports.length}
               icon={<FileText className="w-6 h-6 text-white" />}
               color="yellow"
+            />
+            <StatCard
+              title="涉及作品"
+              value={new Set(reports.map(r => r.workId)).size}
+              icon={<Music className="w-6 h-6 text-white" />}
+              color="cyan"
             />
           </motion.div>
 
@@ -399,54 +408,60 @@ export const Royalty: React.FC = () => {
                       <TrendingUp className="w-5 h-5 text-violet-400" />
                       收益趋势
                     </h2>
-                    <p className="text-sm text-slate-400 mt-1">近6个月收益情况</p>
+                    <p className="text-sm text-slate-400 mt-1">各月份收益情况</p>
                   </div>
                 </div>
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyRevenueData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8} />
-                          <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.6} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} />
-                      <XAxis
-                        dataKey="month"
-                        stroke="#64748b"
-                        fontSize={12}
-                        tickLine={false}
-                        axisLine={false}
-                      />
-                      <YAxis
-                        stroke="#64748b"
-                        fontSize={12}
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={(value) => `¥${(value / 10000).toFixed(0)}万`}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#1e293b',
-                          border: '1px solid #334155',
-                          borderRadius: '12px',
-                          color: '#f1f5f9',
-                          boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
-                        }}
-                        itemStyle={{ color: '#f1f5f9' }}
-                        labelStyle={{ color: '#94a3b8', marginBottom: '8px' }}
-                        formatter={(value: number) => [`¥${value.toLocaleString()}`, '收益']}
-                      />
-                      <Bar
-                        dataKey="收益"
-                        strokeWidth={0}
-                        fill="url(#colorRevenue)"
-                        radius={[8, 8, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                {monthlyRevenueData.length > 0 ? (
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={monthlyRevenueData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8} />
+                            <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.6} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.3} />
+                        <XAxis
+                          dataKey="month"
+                          stroke="#64748b"
+                          fontSize={12}
+                          tickLine={false}
+                          axisLine={false}
+                        />
+                        <YAxis
+                          stroke="#64748b"
+                          fontSize={12}
+                          tickLine={false}
+                          axisLine={false}
+                          tickFormatter={(value) => `¥${(value / 10000).toFixed(0)}万`}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: '#1e293b',
+                            border: '1px solid #334155',
+                            borderRadius: '12px',
+                            color: '#f1f5f9',
+                            boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+                          }}
+                          itemStyle={{ color: '#f1f5f9' }}
+                          labelStyle={{ color: '#94a3b8', marginBottom: '8px' }}
+                          formatter={(value: number) => [`¥${value.toLocaleString()}`, '收益']}
+                        />
+                        <Bar
+                          dataKey="收益"
+                          strokeWidth={0}
+                          fill="url(#colorRevenue)"
+                          radius={[8, 8, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="h-80 flex items-center justify-center text-slate-500">
+                    暂无收益数据
+                  </div>
+                )}
               </Card>
             </motion.div>
 
@@ -461,42 +476,50 @@ export const Royalty: React.FC = () => {
                     <p className="text-sm text-slate-400 mt-1">各参与方分成比例分布</p>
                   </div>
                 </div>
-                <div className="h-80 flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={mockParticipants.map(p => ({ name: p.name, value: p.percentage }))}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={100}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {mockParticipants.map((_, index) => (
-                          <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#1e293b',
-                          border: '1px solid #334155',
-                          borderRadius: '12px',
-                          color: '#f1f5f9'
-                        }}
-                        formatter={(value: number) => [`${value}%`, '分成']}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="flex flex-wrap gap-3 justify-center mt-2">
-                  {mockParticipants.map((p, idx) => (
-                    <div key={p.id} className="flex items-center gap-2">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLORS[idx] }} />
-                      <span className="text-sm text-slate-400">{p.name} ({getRoleLabel(p.role)})</span>
+                {globalSplitData.length > 0 ? (
+                  <>
+                    <div className="h-80 flex items-center justify-center">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={globalSplitData.map(s => ({ name: s.name, value: s.avgPercentage }))}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={60}
+                            outerRadius={100}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            {globalSplitData.map((_, index) => (
+                              <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: '#1e293b',
+                              border: '1px solid #334155',
+                              borderRadius: '12px',
+                              color: '#f1f5f9'
+                            }}
+                            formatter={(value: number) => [`${value}%`, '平均分成']}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
                     </div>
-                  ))}
-                </div>
+                    <div className="flex flex-wrap gap-3 justify-center mt-2">
+                      {globalSplitData.map((p, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }} />
+                          <span className="text-sm text-slate-400">{p.name} ({getRoleLabel(p.role)})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="h-80 flex items-center justify-center text-slate-500">
+                    暂无分成数据
+                  </div>
+                )}
               </Card>
             </motion.div>
           </div>
@@ -513,52 +536,62 @@ export const Royalty: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-4">
-                {reports.map((report) => (
-                  <Card key={report.id} hover className="p-4">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="flex items-start gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500/20 to-cyan-500/20 flex items-center justify-center flex-shrink-0">
-                          <Calendar className="w-6 h-6 text-violet-400" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-3 mb-1">
-                            <h3 className="text-white font-medium">{report.work?.title}</h3>
-                            <StatusBadge status="completed" size="sm" />
+              {reports.length === 0 ? (
+                <div className="text-center py-12 text-slate-500">
+                  暂无结算报告
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {reports.map((report) => (
+                    <Card key={report.id} hover className="p-4">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="flex items-start gap-4">
+                          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500/20 to-cyan-500/20 flex items-center justify-center flex-shrink-0">
+                            <Calendar className="w-6 h-6 text-violet-400" />
                           </div>
-                          <p className="text-sm text-slate-400 mb-2">
-                            {report.month.replace('-', '年')}月 · 生成于 {report.generatedAt}
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {report.splits?.map((s, idx) => (
-                              <div key={s.id} className="flex items-center gap-1.5 text-xs text-slate-500">
-                                <img src={s.avatar} alt={s.name} className="w-4 h-4 rounded-full" />
-                                <span>{s.name} ¥{((report.totalRevenue * s.percentage) / 100).toLocaleString()}</span>
+                          <div>
+                            <div className="flex items-center gap-3 mb-1">
+                              <h3 className="text-white font-medium">{report.work?.title || `作品#${report.workId}`}</h3>
+                              <StatusBadge status="completed" size="sm" />
+                            </div>
+                            <p className="text-sm text-slate-400 mb-2">
+                              {report.month.replace('-', '年')}月 · 生成于 {report.generatedAt}
+                            </p>
+                            {report.splits && report.splits.length > 0 && (
+                              <div className="flex flex-wrap gap-2">
+                                {report.splits.map((s, idx) => (
+                                  <div key={idx} className="flex items-center gap-1.5 text-xs text-slate-500">
+                                    <div className="w-4 h-4 rounded-full bg-violet-500/30 flex items-center justify-center text-[10px] text-violet-300">
+                                      {s.name.charAt(0)}
+                                    </div>
+                                    <span>{s.name} ¥{((report.totalRevenue * s.percentage) / 100).toLocaleString()}</span>
+                                  </div>
+                                ))}
                               </div>
-                            ))}
+                            )}
                           </div>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
-                          <p className="text-xs text-slate-500 mb-1">总收益</p>
-                          <p className="text-xl font-bold text-emerald-400">
-                            ¥{report.totalRevenue.toLocaleString()}
-                          </p>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <p className="text-xs text-slate-500 mb-1">总收益</p>
+                            <p className="text-xl font-bold text-emerald-400">
+                              ¥{report.totalRevenue.toLocaleString()}
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="md"
+                            onClick={() => handleDownloadReport(report)}
+                          >
+                            <Download className="w-4 h-4" />
+                            下载PDF
+                          </Button>
                         </div>
-                        <Button
-                          variant="outline"
-                          size="md"
-                          onClick={() => handleDownloadReport(report)}
-                        >
-                          <Download className="w-4 h-4" />
-                          下载PDF
-                        </Button>
                       </div>
-                    </div>
-                  </Card>
-                ))}
-              </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
             </Card>
           </motion.div>
         </>
@@ -575,13 +608,13 @@ export const Royalty: React.FC = () => {
             <div className="flex items-center gap-3">
               <div className="flex -space-x-2">
                 {tempSplits.map((p, idx) => (
-                  <img
+                  <div
                     key={p.id}
-                    src={p.avatar}
-                    alt={p.name}
-                    className="w-10 h-10 rounded-full border-2 border-slate-800"
+                    className="w-10 h-10 rounded-full border-2 border-slate-800 bg-violet-500/30 flex items-center justify-center text-sm text-violet-300 font-medium"
                     style={{ zIndex: tempSplits.length - idx }}
-                  />
+                  >
+                    {p.name.charAt(0)}
+                  </div>
                 ))}
               </div>
               <div>
@@ -604,11 +637,9 @@ export const Royalty: React.FC = () => {
               {tempSplits.map((participant, index) => (
                 <div key={participant.id} className="p-4 rounded-xl bg-slate-700/30">
                   <div className="flex items-center gap-3 mb-3">
-                    <img
-                      src={participant.avatar}
-                      alt={participant.name}
-                      className="w-12 h-12 rounded-full"
-                    />
+                    <div className="w-12 h-12 rounded-full bg-violet-500/30 flex items-center justify-center text-violet-300 font-medium">
+                      {participant.name.charAt(0)}
+                    </div>
                     <div className="flex-1">
                       <p className="text-white font-medium">{participant.name}</p>
                       <p className="text-sm text-slate-400">{getRoleLabel(participant.role)}</p>
@@ -679,7 +710,7 @@ export const Royalty: React.FC = () => {
                 {tempSplits.map((p, idx) => (
                   <div key={p.id} className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLORS[idx] }} />
+                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }} />
                       <span className="text-slate-400">{p.name}</span>
                     </div>
                     <span className="text-white font-medium">{p.percentage}%</span>

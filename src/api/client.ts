@@ -153,13 +153,11 @@ export const adminApi = {
   getMaterials: (): Promise<ApiResponse<any[]>> =>
     apiClient.get('/admin/materials').then(res => res.data),
   
-  createMaterial: (formData: FormData): Promise<ApiResponse<any>> =>
-    apiClient.post('/admin/materials', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    }).then(res => res.data),
+  createMaterial: (data: any): Promise<ApiResponse<any>> =>
+    apiClient.post('/admin/materials', data).then(res => res.data),
   
   updateMaterial: (id: number, data: any): Promise<ApiResponse<any>> =>
-    apiClient.put(`/admin/materials/${id}`, data).then(res => res.data),
+    apiClient.post('/admin/materials/permissions', { materialId: id, accessPermissions: data.accessPermissions }).then(res => res.data),
   
   deleteMaterial: (id: number): Promise<ApiResponse<any>> =>
     apiClient.delete(`/admin/materials/${id}`).then(res => res.data),

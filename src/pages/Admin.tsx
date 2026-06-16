@@ -54,14 +54,6 @@ const userGrowthData = [
   { month: '12月', 用户数: 256 }
 ];
 
-const mockMaterials: Material[] = [
-  { id: 1, name: '鼓组采样包 - 电子音乐', category: '鼓组', accessPermissions: ['producer', 'engineer'], createdAt: '2025-05-15 10:30' },
-  { id: 2, name: '钢琴预设合集', category: '音色', accessPermissions: ['producer', 'engineer', 'songwriter'], createdAt: '2025-05-12 14:20' },
-  { id: 3, name: '人声效果链模板', category: '效果器', accessPermissions: ['engineer'], createdAt: '2025-05-10 09:15' },
-  { id: 4, name: '混音参考轨道合集', category: '参考', accessPermissions: ['producer', 'engineer'], createdAt: '2025-05-08 16:45' },
-  { id: 5, name: '母带处理预设包', category: '效果器', accessPermissions: ['engineer'], createdAt: '2025-05-05 11:30' }
-];
-
 const mockTasks: ScheduledTask[] = [
   { name: '数据库备份', cron: '0 2 * * *', nextRun: '2025-06-18 02:00', lastRun: '2025-06-17 02:00', status: 'idle' },
   { name: '版税结算', cron: '0 0 1 * *', nextRun: '2025-07-01 00:00', lastRun: '2025-06-01 00:00', status: 'idle' },
@@ -111,7 +103,8 @@ const itemVariants = {
 export const Admin: React.FC = () => {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const [materials, setMaterials] = useState<Material[]>(mockMaterials);
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [materialsLoading, setMaterialsLoading] = useState(false);
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({ cpu: 32, memory: 58, storage: 75, network: 85 });
   const [tasks, setTasks] = useState<ScheduledTask[]>(mockTasks);
   const [logs, setLogs] = useState<LogEntry[]>(mockLogs);
@@ -136,6 +129,24 @@ export const Admin: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const fetchMaterials = async () => {
+    setMaterialsLoading(true);
+    try {
+      const response = await adminApi.getMaterials();
+      if (response.success && response.data) {
+        setMaterials(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to fetch materials:', error);
+    } finally {
+      setMaterialsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMaterials();
+  }, []);
+
   useEffect(() => {
     if (toast.show) {
       const timer = setTimeout(() => setToast({ ...toast, show: false }), 3000);
@@ -155,25 +166,31 @@ export const Admin: React.FC = () => {
   const handlePermissionSave = async () => {
     if (!permissionModal.material) return;
     try {
-      await adminApi.updateMaterial(permissionModal.material.id, { accessPermissions: selectedRoles });
-      setMaterials(materials.map(m => 
-        m.id === permissionModal.material!.id ? { ...m, accessPermissions: selectedRoles } : m
-      ));
-      setPermissionModal({ open: false, material: null });
-      showToast('权限设置成功', 'success');
-    } catch (error) {
-      showToast('权限设置失败', 'error');
+      const response = await adminApi.updateMaterial(permissionModal.material.id, { accessPermissions: selectedRoles });
+      if (response.success) {
+        await fetchMaterials();
+        setPermissionModal({ open: false, material: null });
+        showToast('权限设置成功', 'success');
+      } else {
+        showToast(response.message || '权限设置失败', 'error');
+      }
+    } catch (error: any) {
+      showToast(error?.response?.data?.message || '权限设置失败', 'error');
     }
   };
 
   const handleDeleteMaterial = async (id: number) => {
     if (!confirm('确定要删除此素材吗？')) return;
     try {
-      await adminApi.deleteMaterial(id);
-      setMaterials(materials.filter(m => m.id !== id));
-      showToast('素材删除成功', 'success');
-    } catch (error) {
-      showToast('素材删除失败', 'error');
+      const response = await adminApi.deleteMaterial(id);
+      if (response.success) {
+        await fetchMaterials();
+        showToast('素材删除成功', 'success');
+      } else {
+        showToast(response.message || '素材删除失败', 'error');
+      }
+    } catch (error: any) {
+      showToast(error?.response?.data?.message || '素材删除失败', 'error');
     }
   };
 
@@ -183,20 +200,17 @@ export const Admin: React.FC = () => {
       return;
     }
     try {
-      const formData = new FormData();
-      formData.append('name', uploadForm.name);
-      formData.append('category', uploadForm.category);
-      formData.append('filePath', uploadForm.filePath);
-      formData.append('accessPermissions', JSON.stringify(uploadForm.roles));
-      const response = await adminApi.createMaterial(formData);
-      if (response.success && response.data) {
-        setMaterials([response.data as Material, ...materials]);
+      const response = await adminApi.createMaterial(uploadForm as any);
+      if (response.success) {
+        await fetchMaterials();
         setUploadModal(false);
         setUploadForm({ name: '', category: '', filePath: '', roles: [] });
         showToast('素材上传成功', 'success');
+      } else {
+        showToast(response.message || '素材上传失败', 'error');
       }
-    } catch (error) {
-      showToast('素材上传失败', 'error');
+    } catch (error: any) {
+      showToast(error?.response?.data?.message || '素材上传失败', 'error');
     }
   };
 
